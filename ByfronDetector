@@ -1,0 +1,118 @@
+# ============================================================
+# Byfron Async | newui.exe + _license.dat Scanner
+# Made by @clearfall
+# ============================================================
+
+function Write-ColoredLine {
+    param (
+        [string]$Text,
+        [ConsoleColor]$Color = 'White'
+    )
+    $oldColor = $Host.UI.RawUI.ForegroundColor
+    $Host.UI.RawUI.ForegroundColor = $Color
+    Write-Host $Text
+    $Host.UI.RawUI.ForegroundColor = $oldColor
+}
+
+function Center-Text {
+    param([string]$Text, [ConsoleColor]$Color = 'White')
+    $width = [console]::WindowWidth
+    $pad = [math]::Max(0, [math]::Floor(($width - $Text.Length) / 2))
+    Write-Host (" " * $pad + $Text) -ForegroundColor $Color
+}
+
+function Wait-ForEnter {
+    param([string]$Message = "Press Enter to exit...")
+    Start-Sleep -Seconds 1
+    Write-ColoredLine $Message Yellow
+    while ($true) {
+        if ([System.Console]::KeyAvailable) {
+            $key = [System.Console]::ReadKey($true)
+            if ($key.Key -eq "Enter") { break }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+function Show-ScanningAnimation {
+    param([string]$Message)
+    $chars = "/-\|"
+    for ($i = 0; $i -lt 20; $i++) {
+        $c = $chars[$i % $chars.Length]
+        Write-Host -NoNewline "`r[$c] $Message" -ForegroundColor Gray
+        Start-Sleep -Milliseconds 80
+    }
+    Write-Host ""
+}
+
+function Search-File {
+    param ([string]$FileName)
+    $found = $null
+    Write-ColoredLine "[INFO] Searching for $FileName across all drives..." Yellow
+
+    foreach ($drive in Get-PSDrive -PSProvider FileSystem) {
+        Show-ScanningAnimation "Scanning: $($drive.Root)"
+        try {
+            $found = Get-ChildItem -Path $drive.Root -Recurse -ErrorAction SilentlyContinue -Force |
+                     Where-Object { $_.Name -ieq $FileName } |
+                     Select-Object -First 1
+            if ($found) { break }
+        } catch {}
+    }
+    return $found
+}
+
+# ============================================================
+# UI Banner
+# ============================================================
+
+Clear-Host
+Center-Text "__________          _____                      " Cyan
+Center-Text "\______   \___.__._/ ____\______  ____   ____  " Cyan
+Center-Text " |    |  _<   |  |\   __\\_  __ \/  _ \ /    \ " Cyan
+Center-Text " |    |   \\___  | |  |   |  | \(  <_> )   |  \" Cyan
+Center-Text " |______  // ____| |__|   |__|   \____/|___|  /" Cyan
+Center-Text "        \/ \/                               \/ " Cyan
+Write-Host ""
+Center-Text "=== BYFRON ASYNC SCANNER ===" Yellow
+Write-Host ""
+
+# ============================================================
+# Scan for newui.exe
+# ============================================================
+
+$newuiFile = Search-File -FileName "newui.exe"
+if ($newuiFile) {
+    Write-ColoredLine "[SUCCESS] Detected newui.exe at: $($newuiFile.FullName)" Green
+} else {
+    Write-ColoredLine "[WARNING] newui.exe not found on any drive." Yellow
+}
+
+Write-Host ""
+
+# ============================================================
+# Scan for _license.dat
+# ============================================================
+
+$licenseFile = Search-File -FileName "_license.dat"
+if ($licenseFile) {
+    try {
+        $key = Get-Content -Path $licenseFile.FullName -ErrorAction Stop | Out-String
+        $key = $key.Trim()
+        if ($key) {
+            Write-ColoredLine "Matrix Key Found: $key" Cyan
+        } else {
+            Write-ColoredLine "[INFO] _license.dat found but file is empty." Yellow
+        }
+    } catch {
+        Write-ColoredLine "[WARNING] Could not read _license.dat: $($_.Exception.Message)" Yellow
+    }
+} else {
+    Write-ColoredLine "[INFO] No _license.dat file found." White
+}
+
+Write-Host ""
+Center-Text "Scan Complete." Green
+Center-Text "Made by @clearfall" White
+Write-Host ""
+Wait-ForEnter
