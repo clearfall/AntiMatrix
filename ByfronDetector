@@ -1,6 +1,5 @@
 # ============================================================
-# Byfron Async | newui.exe + _license.dat Scanner
-# Made by @clearfall
+# Byfron Async | newui.exe + _license.dat Scanner (Fast)
 # ============================================================
 
 function Write-ColoredLine {
@@ -34,32 +33,49 @@ function Wait-ForEnter {
     }
 }
 
-function Show-ScanningAnimation {
-    param([string]$Message)
-    $chars = "/-\|"
-    for ($i = 0; $i -lt 20; $i++) {
-        $c = $chars[$i % $chars.Length]
-        Write-Host -NoNewline "`r[$c] $Message" -ForegroundColor Gray
-        Start-Sleep -Milliseconds 80
-    }
-    Write-Host ""
-}
-
-function Search-File {
+function Search-FileFast {
     param ([string]$FileName)
     $found = $null
-    Write-ColoredLine "[INFO] Searching for $FileName across all drives..." Yellow
+    Write-ColoredLine "Checking for file $FileName ..." Yellow
 
-    foreach ($drive in Get-PSDrive -PSProvider FileSystem) {
-        Show-ScanningAnimation "Scanning: $($drive.Root)"
-        try {
-            $found = Get-ChildItem -Path $drive.Root -Recurse -ErrorAction SilentlyContinue -Force |
+    # Common locations first (faster)
+    $commonPaths = @(
+        "$env:ProgramFiles",
+        "$env:ProgramFiles(x86)",
+        "$env:USERPROFILE\Desktop",
+        "$env:USERPROFILE\Downloads",
+        "$env:USERPROFILE\Documents",
+        "C:\ToolsETA"
+    )
+
+    foreach ($path in $commonPaths) {
+        if (Test-Path $path) {
+            $found = Get-ChildItem -Path $path -Recurse -ErrorAction SilentlyContinue -Force |
                      Where-Object { $_.Name -ieq $FileName } |
                      Select-Object -First 1
-            if ($found) { break }
+            if ($found) { return $found }
+        }
+    }
+
+    # If not found, scan all drives quickly (top-level only)
+    foreach ($drive in Get-PSDrive -PSProvider FileSystem) {
+        try {
+            $items = Get-ChildItem -Path $drive.Root -ErrorAction SilentlyContinue -Force
+            foreach ($item in $items) {
+                if ($item.PSIsContainer) {
+                    try {
+                        $found = Get-ChildItem -Path $item.FullName -ErrorAction SilentlyContinue -Force |
+                                 Where-Object { $_.Name -ieq $FileName } |
+                                 Select-Object -First 1
+                        if ($found) { return $found }
+                    } catch {}
+                } elseif ($item.Name -ieq $FileName) {
+                    return $item
+                }
+            }
         } catch {}
     }
-    return $found
+    return $null
 }
 
 # ============================================================
@@ -81,11 +97,11 @@ Write-Host ""
 # Scan for newui.exe
 # ============================================================
 
-$newuiFile = Search-File -FileName "newui.exe"
+$newuiFile = Search-FileFast -FileName "newui.exe"
 if ($newuiFile) {
-    Write-ColoredLine "[SUCCESS] Detected newui.exe at: $($newuiFile.FullName)" Green
+    Write-ColoredLine "[FOUND] newui.exe at: $($newuiFile.FullName)" Green
 } else {
-    Write-ColoredLine "[WARNING] newui.exe not found on any drive." Yellow
+    Write-ColoredLine "[INFO] newui.exe not found." Yellow
 }
 
 Write-Host ""
@@ -94,7 +110,7 @@ Write-Host ""
 # Scan for _license.dat
 # ============================================================
 
-$licenseFile = Search-File -FileName "_license.dat"
+$licenseFile = Search-FileFast -FileName "_license.dat"
 if ($licenseFile) {
     try {
         $key = Get-Content -Path $licenseFile.FullName -ErrorAction Stop | Out-String
@@ -102,7 +118,7 @@ if ($licenseFile) {
         if ($key) {
             Write-ColoredLine "Matrix Key Found: $key" Cyan
         } else {
-            Write-ColoredLine "[INFO] _license.dat found but file is empty." Yellow
+            Write-ColoredLine "[INFO] _license.dat found but empty." Yellow
         }
     } catch {
         Write-ColoredLine "[WARNING] Could not read _license.dat: $($_.Exception.Message)" Yellow
@@ -112,7 +128,13 @@ if ($licenseFile) {
 }
 
 Write-Host ""
-Center-Text "Scan Complete." Green
-Center-Text "Made by @clearfall" White
-Write-Host ""
+
+# ============================================================
+# PC Check
+# ============================================================
+
+if ($newuiFile -and $licenseFile) {
+    Write-ColoredLine "PC Check failed" Red
+}
+
 Wait-ForEnter
