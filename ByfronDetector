@@ -1,141 +1,52 @@
-# ============================================================
-# Byfron Async | newui.exe + _license.dat Scanner (Fast)
-# ============================================================
-
-function Write-ColoredLine {
-    param (
-        [string]$Text,
-        [ConsoleColor]$Color = 'White'
-    )
-    $oldColor = $Host.UI.RawUI.ForegroundColor
-    $Host.UI.RawUI.ForegroundColor = $Color
-    Write-Host $Text
-    $Host.UI.RawUI.ForegroundColor = $oldColor
+# =============================
+# Check for required files
+# =============================
+Write-Host "Checking for file newui.exe..."
+if (-Not (Test-Path "newui.exe")) {
+    Write-Host "File newui.exe not found!"
+    exit
 }
 
-function Center-Text {
-    param([string]$Text, [ConsoleColor]$Color = 'White')
-    $width = [console]::WindowWidth
-    $pad = [math]::Max(0, [math]::Floor(($width - $Text.Length) / 2))
-    Write-Host (" " * $pad + $Text) -ForegroundColor $Color
+Write-Host "Checking for file _license.dat..."
+if (-Not (Test-Path "_license.dat")) {
+    Write-Host "File _license.dat not found!"
+    exit
 }
 
-function Wait-ForEnter {
-    param([string]$Message = "Press Enter to exit...")
-    Start-Sleep -Seconds 1
-    Write-ColoredLine $Message Yellow
-    while ($true) {
-        if ([System.Console]::KeyAvailable) {
-            $key = [System.Console]::ReadKey($true)
-            if ($key.Key -eq "Enter") { break }
-        }
-        Start-Sleep -Milliseconds 100
+# =============================
+# Start remote jobs
+# =============================
+# Example: running commands on remote computers
+$computers = @("Server01", "Server02")  # adjust as needed
+$jobs = @()  # initialize empty array for jobs
+
+foreach ($computer in $computers) {
+    $job = Invoke-Command -ComputerName $computer -ScriptBlock {
+        # Replace this with the real script block
+        Get-Process
+    } -AsJob
+    $jobs += $job
+}
+
+# =============================
+# Wait for jobs to complete and process results
+# =============================
+foreach ($job in @($jobs)) {
+    # Wait for the job to finish
+    $job | Wait-Job
+
+    # Check job state
+    if ($job.State -eq 'Completed') {
+        $result = Receive-Job -Job $job
+        Write-Host "Job $($job.Id) on $($job.Location) completed successfully."
+        Write-Output $result
     }
-}
-
-function Search-FileFast {
-    param ([string]$FileName)
-    $found = $null
-    Write-ColoredLine "Checking for file $FileName ..." Yellow
-
-    # Common locations first (fastest)
-    $commonPaths = @(
-        "$env:ProgramFiles",
-        "$env:ProgramFiles(x86)",
-        "$env:USERPROFILE\Desktop",
-        "$env:USERPROFILE\Downloads",
-        "$env:USERPROFILE\Documents",
-        "C:\ToolsETA"
-    )
-
-    foreach ($path in $commonPaths) {
-        if (Test-Path $path) {
-            $found = Get-ChildItem -Path $path -Recurse -ErrorAction SilentlyContinue -Force |
-                     Where-Object { $_.Name -ieq $FileName } |
-                     Select-Object -First 1
-            if ($found) { return $found }
-        }
+    else {
+        Write-Host "Job $($job.Id) on $($job.Location) failed or is in state $($job.State)."
     }
 
-    # Scan top-level of all drives (very fast)
-    foreach ($drive in Get-PSDrive -PSProvider FileSystem) {
-        try {
-            $items = Get-ChildItem -Path $drive.Root -ErrorAction SilentlyContinue -Force
-            foreach ($item in $items) {
-                if ($item.PSIsContainer) {
-                    try {
-                        $found = Get-ChildItem -Path $item.FullName -ErrorAction SilentlyContinue -Force |
-                                 Where-Object { $_.Name -ieq $FileName } |
-                                 Select-Object -First 1
-                        if ($found) { return $found }
-                    } catch {}
-                } elseif ($item.Name -ieq $FileName) {
-                    return $item
-                }
-            }
-        } catch {}
-    }
-
-    return $null
+    # Remove the job to clean up
+    Remove-Job -Job $job
 }
 
-# ============================================================
-# UI Banner
-# ============================================================
-
-Clear-Host
-Center-Text "__________          _____                      " Cyan
-Center-Text "\______   \___.__._/ ____\______  ____   ____  " Cyan
-Center-Text " |    |  _<   |  |\   __\\_  __ \/  _ \ /    \ " Cyan
-Center-Text " |    |   \\___  | |  |   |  | \(  <_> )   |  \" Cyan
-Center-Text " |______  // ____| |__|   |__|   \____/|___|  /" Cyan
-Center-Text "        \/ \/                               \/ " Cyan
-Write-Host ""
-Center-Text "=== BYFRON ASYNC SCANNER ===" Yellow
-Write-Host ""
-
-# ============================================================
-# Scan for newui.exe
-# ============================================================
-
-$newuiFile = Search-FileFast -FileName "newui.exe"
-if ($newuiFile) {
-    Write-ColoredLine "[FOUND] newui.exe at: $($newuiFile.FullName)" Green
-} else {
-    Write-ColoredLine "[INFO] newui.exe not found." Yellow
-}
-
-Write-Host ""
-
-# ============================================================
-# Scan for _license.dat
-# ============================================================
-
-$licenseFile = Search-FileFast -FileName "_license.dat"
-if ($licenseFile) {
-    try {
-        $key = Get-Content -Path $licenseFile.FullName -ErrorAction Stop | Out-String
-        $key = $key.Trim()
-        if ($key) {
-            Write-ColoredLine "Matrix Key Found: $key" Cyan
-        } else {
-            Write-ColoredLine "[INFO] _license.dat found but empty." Yellow
-        }
-    } catch {
-        Write-ColoredLine "[WARNING] Could not read _license.dat: $($_.Exception.Message)" Yellow
-    }
-} else {
-    Write-ColoredLine "[INFO] No _license.dat file found." White
-}
-
-Write-Host ""
-
-# ============================================================
-# PC Check
-# ============================================================
-
-if ($newuiFile -and $licenseFile) {
-    Write-ColoredLine "PC Check failed" Red
-}
-
-Wait-ForEnter
+Write-Host "All jobs processed."
