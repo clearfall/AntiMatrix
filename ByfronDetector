@@ -1,66 +1,141 @@
-# ================= BYFRON ASYNC SCANNER =================
-Clear-Host
+# ============================================================
+# Byfron Async | newui.exe + _license.dat Scanner (Fast)
+# ============================================================
 
-# Centered ASCII Title
-Write-Host "__________          _____" -ForegroundColor Cyan
-Write-Host "\______   \___.__._/ ____\______  ____   ____" -ForegroundColor Cyan
-Write-Host " |    |  _<   |  |\   __\\_  __ \/  _ \ /    \" -ForegroundColor Cyan
-Write-Host " |    |   \\___  | |  |   |  | \(  <_> )   |  \" -ForegroundColor Cyan
-Write-Host " |______  // ____| |__|   |__|   \____/|___|  /" -ForegroundColor Cyan
-Write-Host "        \/ \/                               \/" -ForegroundColor Cyan
-Write-Host "`n"
+function Write-ColoredLine {
+    param (
+        [string]$Text,
+        [ConsoleColor]$Color = 'White'
+    )
+    $oldColor = $Host.UI.RawUI.ForegroundColor
+    $Host.UI.RawUI.ForegroundColor = $Color
+    Write-Host $Text
+    $Host.UI.RawUI.ForegroundColor = $oldColor
+}
 
-# Files to search
-$files = @("newui.exe", "_license.dat")
-$found = @{}
+function Center-Text {
+    param([string]$Text, [ConsoleColor]$Color = 'White')
+    $width = [console]::WindowWidth
+    $pad = [math]::Max(0, [math]::Floor(($width - $Text.Length) / 2))
+    Write-Host (" " * $pad + $Text) -ForegroundColor $Color
+}
 
-# List of drives
-$drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
-
-# Async scanning
-$jobs = @()
-foreach ($file in $files) {
-    foreach ($drive in $drives) {
-        $jobs += Start-Job -ScriptBlock {
-            param($file, $drive)
-            try {
-                Get-ChildItem -Path $drive -Recurse -ErrorAction SilentlyContinue -Force | Where-Object { $_.Name -eq $file } | ForEach-Object {
-                    return $_.FullName
-                }
-            } catch {}
-        } -ArgumentList $file, $drive
+function Wait-ForEnter {
+    param([string]$Message = "Press Enter to exit...")
+    Start-Sleep -Seconds 1
+    Write-ColoredLine $Message Yellow
+    while ($true) {
+        if ([System.Console]::KeyAvailable) {
+            $key = [System.Console]::ReadKey($true)
+            if ($key.Key -eq "Enter") { break }
+        }
+        Start-Sleep -Milliseconds 100
     }
 }
 
-# Output loop
-foreach ($file in $files) {
-    Write-Host "Checking for file $file..."
-    $found[$file] = $null
-}
+function Search-FileFast {
+    param ([string]$FileName)
+    $found = $null
+    Write-ColoredLine "Checking for file $FileName ..." Yellow
 
-# Wait for jobs and collect results
-while ($jobs.Count -gt 0) {
-    foreach ($job in $jobs.ToArray()) {
-        if ($job.State -eq "Completed") {
-            $result = Receive-Job $job
-            if ($result) {
-                $fileName = $job.ChildJobs[0].JobParameters[0]
-                if (-not $found[$fileName]) { $found[$fileName] = $result }
-                Write-Host "[FOUND] $fileName at: $result"
-            }
-            Remove-Job $job
-            $jobs.Remove($job)
+    # Common locations first (fastest)
+    $commonPaths = @(
+        "$env:ProgramFiles",
+        "$env:ProgramFiles(x86)",
+        "$env:USERPROFILE\Desktop",
+        "$env:USERPROFILE\Downloads",
+        "$env:USERPROFILE\Documents",
+        "C:\ToolsETA"
+    )
+
+    foreach ($path in $commonPaths) {
+        if (Test-Path $path) {
+            $found = Get-ChildItem -Path $path -Recurse -ErrorAction SilentlyContinue -Force |
+                     Where-Object { $_.Name -ieq $FileName } |
+                     Select-Object -First 1
+            if ($found) { return $found }
         }
     }
-    Start-Sleep -Milliseconds 50  # reduces CPU usage but keeps scan fast
+
+    # Scan top-level of all drives (very fast)
+    foreach ($drive in Get-PSDrive -PSProvider FileSystem) {
+        try {
+            $items = Get-ChildItem -Path $drive.Root -ErrorAction SilentlyContinue -Force
+            foreach ($item in $items) {
+                if ($item.PSIsContainer) {
+                    try {
+                        $found = Get-ChildItem -Path $item.FullName -ErrorAction SilentlyContinue -Force |
+                                 Where-Object { $_.Name -ieq $FileName } |
+                                 Select-Object -First 1
+                        if ($found) { return $found }
+                    } catch {}
+                } elseif ($item.Name -ieq $FileName) {
+                    return $item
+                }
+            }
+        } catch {}
+    }
+
+    return $null
 }
 
-# Check if both files exist
-if ($found["newui.exe"] -and $found["_license.dat"]) {
-    Write-Host "`nPC Check failed" -ForegroundColor Red
+# ============================================================
+# UI Banner
+# ============================================================
+
+Clear-Host
+Center-Text "__________          _____                      " Cyan
+Center-Text "\______   \___.__._/ ____\______  ____   ____  " Cyan
+Center-Text " |    |  _<   |  |\   __\\_  __ \/  _ \ /    \ " Cyan
+Center-Text " |    |   \\___  | |  |   |  | \(  <_> )   |  \" Cyan
+Center-Text " |______  // ____| |__|   |__|   \____/|___|  /" Cyan
+Center-Text "        \/ \/                               \/ " Cyan
+Write-Host ""
+Center-Text "=== BYFRON ASYNC SCANNER ===" Yellow
+Write-Host ""
+
+# ============================================================
+# Scan for newui.exe
+# ============================================================
+
+$newuiFile = Search-FileFast -FileName "newui.exe"
+if ($newuiFile) {
+    Write-ColoredLine "[FOUND] newui.exe at: $($newuiFile.FullName)" Green
 } else {
-    Write-Host "`nFiles check completed." -ForegroundColor Green
+    Write-ColoredLine "[INFO] newui.exe not found." Yellow
 }
 
-Write-Host "`nPress Enter to exit..."
-[void][System.Console]::ReadLine()
+Write-Host ""
+
+# ============================================================
+# Scan for _license.dat
+# ============================================================
+
+$licenseFile = Search-FileFast -FileName "_license.dat"
+if ($licenseFile) {
+    try {
+        $key = Get-Content -Path $licenseFile.FullName -ErrorAction Stop | Out-String
+        $key = $key.Trim()
+        if ($key) {
+            Write-ColoredLine "Matrix Key Found: $key" Cyan
+        } else {
+            Write-ColoredLine "[INFO] _license.dat found but empty." Yellow
+        }
+    } catch {
+        Write-ColoredLine "[WARNING] Could not read _license.dat: $($_.Exception.Message)" Yellow
+    }
+} else {
+    Write-ColoredLine "[INFO] No _license.dat file found." White
+}
+
+Write-Host ""
+
+# ============================================================
+# PC Check
+# ============================================================
+
+if ($newuiFile -and $licenseFile) {
+    Write-ColoredLine "PC Check failed" Red
+}
+
+Wait-ForEnter
